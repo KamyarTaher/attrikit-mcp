@@ -1,0 +1,53 @@
+{
+  "name": "@attrkit/mcp",
+  "version": "1.4.0",
+  "description": "AttriKit's stdio MCP server for its public Management API",
+  "keywords": [
+    "attrkit",
+    "attribution",
+    "mcp",
+    "model-context-protocol",
+    "automation",
+    "agent-tools"
+  ],
+  "homepage": "https://attrikit.io/en/docs/mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KamyarTaher/attrikit.git",
+    "directory": "packages/mcp"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "attrkit-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "bun build ./src/cli.ts --outdir ./dist --target=node --format=esm --external @modelcontextprotocol/sdk --external zod",
+    "prepack": "bun run build",
+    "typecheck": "tsrs --noEmit",
+    "lint": "node ../../scripts/checks/code-quality-eslint.mjs --workspace packages/mcp",
+    "test": "cd ../.. && vitest run packages/mcp/src",
+    "check:package": "node ../../scripts/checks/published-package.mjs packages/mcp"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@attrkit/shared": "workspace:*",
+    "@types/node": "22.20.5",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
