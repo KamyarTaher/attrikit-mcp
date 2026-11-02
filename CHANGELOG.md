@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.1 (2026-11-02)
+
+### Fixed
+
+- An `ATTRKIT_API_URL` that is set but empty, or only whitespace, now means unset: the server uses
+  `https://attrikit.io` instead of exiting with `Invalid URL`. A client config that writes the
+  variable with an empty value no longer stops the server from starting. A non-empty value that is
+  not a valid API URL is still refused, as before.
+- Every tool argument now carries a description: what it is, its format or unit, and its default
+  when the server or the API applies one. 72 arguments had none, nested ones included. Tool names,
+  argument names, their types and what each tool sends are unchanged.
+- `create_api_key`'s `scopes` now says `["read"]` or `["read", "write"]`: every key needs read, and
+  the API refuses `["write"]` alone with `400 invalid_request`, as it did in 2.0.0. The call itself
+  is unchanged.
+- The `delivery_scope` argument of `create_integration` and `update_integration` describes the
+  attributed scope as "a Matched install at or above the delivery floor", the wording of the
+  Management API contract it mirrors. The option's values and behaviour are unchanged.
+
 ## 2.0.0 (2026-11-02)
 
 ### Changed

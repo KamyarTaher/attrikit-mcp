@@ -36,7 +36,7 @@ it does not recompute it.
 A Meta or TikTok integration has two delivery options. `delivery_scope` is `all`
 (the default: every install with measurement consent, organic ones included) or
 `attributed` (only installs AttriKit attributes to that network: a click ID, a link
-token, or a device match at or above the delivery floor). `renewal_event`
+token, or a Matched install at or above the delivery floor). `renewal_event`
 is `purchase` (the default: a renewal is sent as Purchase) or `custom` (it is
 sent as the custom event `subscription_renewed`, with its value). Set them on
 `create_integration`, or later with `update_integration` and the action

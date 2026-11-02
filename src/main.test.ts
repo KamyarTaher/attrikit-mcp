@@ -36,7 +36,7 @@ describe("runCli dispatch", () => {
   it("with no argument resolves the key and starts the server with it", async () => {
     const d = deps();
     await runCli(["node", "cli"], d);
-    expect(d.startServer).toHaveBeenCalledWith({ apiKey: "sk_test", apiUrl: process.env.ATTRKIT_API_URL?.replace(/\/+$/, "") ?? "https://attrikit.io" });
+    expect(d.startServer).toHaveBeenCalledWith({ apiKey: "sk_test", apiUrl: (process.env.ATTRKIT_API_URL?.trim() ? process.env.ATTRKIT_API_URL : "https://attrikit.io").replace(/\/+$/, "") });
     expect(d.runLogin).not.toHaveBeenCalled();
     expect(d.exit).not.toHaveBeenCalled();
   });

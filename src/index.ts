@@ -41,7 +41,9 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   if (!apiKey) {
     throw new Error("ATTRKIT_API_KEY is required (create one in AttriKit → Settings → API keys). On macOS, run `npx -y @attrkit/mcp login` to store it in the Keychain.");
   }
-  const apiUrl = (env.ATTRKIT_API_URL ?? "https://attrikit.io").replace(/\/+$/, "");
+  // A client config that writes the variable with an empty value means "not set", not a URL to parse.
+  const configuredUrl = env.ATTRKIT_API_URL?.trim() ? env.ATTRKIT_API_URL : undefined;
+  const apiUrl = (configuredUrl ?? "https://attrikit.io").replace(/\/+$/, "");
   validatedApiBaseUrl(apiUrl);
   return { apiKey, apiUrl };
 }
@@ -560,7 +562,7 @@ export const TOOL_NAMES = [
   "lookup_customer_attribution",
 ] as const;
 
-export const SERVER_VERSION = "2.0.0";
+export const SERVER_VERSION = "2.0.1";
 
 const periodSchema = z
   .enum(["7d", "30d", "90d", "all"])
@@ -594,7 +596,7 @@ const ownersSchema = z.record(
 // No default on either: an absent option keeps the API's own ('all', 'purchase' on create; unchanged
 // on update), and a default here would put the field into every request body.
 const deliveryScopeSchema = z.enum(["all", "attributed"]).optional()
-  .describe("Which events a Meta or TikTok integration sends. all (the API's default): the events of every install with measurement consent, organic ones included. attributed: send only events of installs AttriKit attributes to this connection's network (click ID, link token, or device match at or above the delivery floor); others are suppressed with attributed_only_suppressed. Meta and TikTok only: a Google integration refuses attributed.");
+  .describe("Which events a Meta or TikTok integration sends. all (the API's default): the events of every install with measurement consent, organic ones included. attributed: send only events of installs AttriKit attributes to this connection's network (click ID, link token, or a Matched install at or above the delivery floor); others are suppressed with attributed_only_suppressed. Meta and TikTok only: a Google integration refuses attributed.");
 const renewalEventSchema = z.enum(["purchase", "custom"]).optional()
   .describe("How a renewal reaches Meta website and TikTok web events. purchase (the API's default): as Purchase with its price and currency. custom: as the custom event subscription_renewed with its price and currency, so Purchase counts one-time purchases only. App events are unchanged. A Google integration refuses custom.");
 // The list endpoints return a next_cursor the agent can SEE, while three of these tools had no way
@@ -669,19 +671,21 @@ const spendRowSchema = z.object({
     .describe("Accepted camelCase alias for campaign_id."),
   // adset_id and ad_id must be supplied TOGETHER; either alone is a 400 at the API.
   adset_id: z.string().optional().nullable().describe("Ad set id. Must be sent together with ad_id; either one alone is rejected."),
-  adsetId: z.string().optional().nullable(),
-  ad_id: z.string().optional().nullable(),
-  adId: z.string().optional().nullable(),
-  adset_name: z.string().optional().nullable(),
-  adsetName: z.string().optional().nullable(),
-  ad_name: z.string().optional().nullable(),
-  adName: z.string().optional().nullable(),
+  adsetId: z.string().optional().nullable().describe("Accepted camelCase alias for adset_id."),
+  ad_id: z.string().optional().nullable().describe("Ad id. Must be sent together with adset_id; either one alone is rejected."),
+  adId: z.string().optional().nullable().describe("Accepted camelCase alias for ad_id."),
+  adset_name: z.string().optional().nullable().describe("Optional ad set name, as the network reports it."),
+  adsetName: z.string().optional().nullable().describe("Accepted camelCase alias for adset_name."),
+  ad_name: z.string().optional().nullable().describe("Optional ad name, as the network reports it."),
+  adName: z.string().optional().nullable().describe("Accepted camelCase alias for ad_name."),
   metric_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
     .describe("Required metric date. Preferred snake_case spelling."),
   metricDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
     .describe("Accepted camelCase alias for metric_date."),
-  clicks: z.number().int().nonnegative().optional(),
-  impressions: z.number().int().nonnegative().optional(),
+  clicks: z.number().int().nonnegative().optional()
+    .describe("Clicks the network reported for this row. The API stores 0 when omitted."),
+  impressions: z.number().int().nonnegative().optional()
+    .describe("Impressions the network reported for this row. The API stores 0 when omitted."),
   spend_minor_units: z.number().int().nonnegative().optional()
     .describe("Required spend amount. Preferred snake_case spelling."),
   spendMinorUnits: z.number().int().nonnegative().optional()
@@ -763,8 +767,10 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
           .int()
           .min(10_000)
           .max(Number.MAX_SAFE_INTEGER)
-          .nullable(),
-        alert_email: z.string().trim().email().max(320).nullable(),
+          .nullable()
+          .describe("Monthly qualified-install cap, a whole number of at least 10,000, or null to clear the cap (alert_email must then be null too). Once the cap is exceeded, additional install charges stop for the rest of the billing period."),
+        alert_email: z.string().trim().email().max(320).nullable()
+          .describe("Email address for the cap's alerts, at most 320 characters, or null to clear the cap (monthly_qualified_install_cap must then be null too)."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -819,12 +825,15 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       title: "Create an app",
       description: "Create an iOS or Android app without the web UI. Returns the publishable key and a one-time app-scoped management key.",
       inputSchema: {
-        name: z.string().min(1).max(80),
-        bundle_id: z.string().min(3).max(255),
-        platform: z.enum(["iOS", "Android"]),
-        store_url: z.string().url(),
-        timezone: z.string().max(64).optional(),
-        device_matching_mode: z.enum(["on", "strict"]).optional(),
+        name: z.string().min(1).max(80).describe("App name, 1 to 80 characters."),
+        bundle_id: z.string().min(3).max(255)
+          .describe("The iOS bundle id or Android package name, for example com.example.app, 3 to 255 characters."),
+        platform: z.enum(["iOS", "Android"]).describe("The app's platform: iOS or Android."),
+        store_url: z.string().url().describe("The app's App Store or Google Play page URL."),
+        timezone: z.string().max(64).optional()
+          .describe("The app's timezone, at most 64 characters. The API uses UTC when omitted."),
+        device_matching_mode: z.enum(["on", "strict"]).optional()
+          .describe("Coverage mode. on (the API's default): maximum coverage, events of all eligible matches are sent. strict: events of verified matches only."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -867,12 +876,16 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       description: "Update app metadata, store destination, timezone or coverage mode.",
       inputSchema: {
         app_id: requiredAppIdSchema,
-        name: z.string().min(1).max(80).optional(),
-        bundle_id: z.string().min(3).max(255).optional(),
-        platform: z.enum(["iOS", "Android"]).optional(),
-        store_url: z.string().url().optional(),
-        timezone: z.string().max(64).optional(),
-        device_matching_mode: z.enum(["on", "strict"]).optional(),
+        name: z.string().min(1).max(80).optional().describe("New app name, 1 to 80 characters. Omit to keep the current one."),
+        bundle_id: z.string().min(3).max(255).optional()
+          .describe("New iOS bundle id or Android package name, 3 to 255 characters. Omit to keep the current one."),
+        platform: z.enum(["iOS", "Android"]).optional().describe("New platform, iOS or Android. Omit to keep the current one."),
+        store_url: z.string().url().optional()
+          .describe("New App Store or Google Play page URL. Omit to keep the current one."),
+        timezone: z.string().max(64).optional()
+          .describe("New app timezone, at most 64 characters. Omit to keep the current one."),
+        device_matching_mode: z.enum(["on", "strict"]).optional()
+          .describe("New coverage mode. on: maximum coverage, events of all eligible matches are sent. strict: events of verified matches only. Omit to keep the current one."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -962,9 +975,11 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       title: "Create a management key",
       description: "Create a read-only or read/write workspace or app key. The secret is returned once.",
       inputSchema: {
-        label: z.string().min(1).max(80),
-        scopes: z.array(z.enum(["read", "write"])).min(1).max(2),
-        app_id: z.string().uuid().optional().nullable(),
+        label: z.string().min(1).max(80).describe("A name for the key, 1 to 80 characters, shown by list_api_keys."),
+        scopes: z.array(z.enum(["read", "write"])).min(1).max(2)
+          .describe("[\"read\"] or [\"read\", \"write\"]; every key needs read, so the API refuses [\"write\"] alone. Read permits every read, including the POST attribution lookup; write is also required to create, update, rotate, archive and revoke, and to record server events and decisions."),
+        app_id: z.string().uuid().optional().nullable()
+          .describe("App UUID to clamp the key to one app. Omit or pass null for a workspace key. An app-scoped caller can only create keys for its own app."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -982,7 +997,7 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       title: "Revoke a management key",
       description: "Immediately revoke a management key by id.",
-      inputSchema: { key_id: z.string().uuid() },
+      inputSchema: { key_id: z.string().uuid().describe("The key's id (UUID), as returned by list_api_keys.") },
     },
     async ({ key_id }) => toToolResult(await call(`/api/v1/api-keys/${encodeURIComponent(key_id)}`, {
       method: "DELETE",
@@ -998,8 +1013,8 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
         "List tracking links, optionally for one app. Each link's tracking_url is the campaign link to use in the ad (null if unavailable); url is the store destination.",
       inputSchema: {
         app_id: appIdSchema,
-        cursor: z.string().optional(),
-        limit: z.number().int().min(1).max(200).optional(),
+        cursor: cursorSchema,
+        limit: listLimitSchema,
       },
     },
     async ({ app_id, cursor, limit }) => toToolResult(await call("/api/v1/links", {
@@ -1045,7 +1060,7 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
         from: rangeFromSchema,
         to: rangeToSchema,
         cursor: cursorSchema,
-        limit: z.number().int().min(1).max(200).optional(),
+        limit: listLimitSchema,
       },
     },
     async ({ app_id, period, from, to, cursor, limit }) => toToolResult(await call("/api/v1/reports/ads", {
@@ -1068,7 +1083,8 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       description: "Return the same recent attribution events and installs visible on the Live dashboard.",
       inputSchema: {
         app_id: appIdSchema,
-        limit: z.number().int().min(1).max(50).optional(),
+        limit: z.number().int().min(1).max(50).optional()
+          .describe("Rows to return, 1-50. The API returns 50 when omitted."),
         from: calendarDaySchema.optional().describe("First UTC day to include, YYYY-MM-DD. May be sent without to. Sending from, to or cursor switches the response to paged mode, which adds next_cursor."),
         to: calendarDaySchema.optional().describe("Last UTC day to include, YYYY-MM-DD. May be sent without from."),
         cursor: cursorSchema,
@@ -1237,8 +1253,9 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       title: "Enable or disable a campaign link, or attach its network campaign id",
       description: "Change a tracking link between active and disabled, and/or attach the ad network's own campaign id to a link created without one (then pull_network_spend can match its spend). Send status, network_campaign_id, or both. A campaign that already has a different network id is refused with 409 network_campaign_conflict.",
       inputSchema: {
-        link_id: z.string().uuid(),
-        status: z.enum(["active", "disabled"]).optional(),
+        link_id: z.string().uuid().describe("The link's id (UUID), as returned by list_links or create_campaign_link."),
+        status: z.enum(["active", "disabled"]).optional()
+          .describe("active: the link sends people to your store page. disabled: it stops. Omit to leave the status as it is."),
         network_campaign_id: z.string().optional().describe("The ad network's own campaign id (for Meta, the campaign ID in Ads Manager)."),
         idempotency_key: idempotencyKeySchema,
       },
@@ -1282,16 +1299,22 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       description: "Import campaign or creative-level spend rows.",
       inputSchema: {
         app_id: requiredAppIdSchema,
-        network: z.enum(["meta", "google", "tiktok", "apple_ads"]),
-        source: z.enum(["network_api", "csv", "manual"]).optional(),
-        account_ref: z.string().optional(),
-        currency: z.string().length(3),
-        report_timezone: z.string().optional(),
-        covers_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        covers_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        completeness: z.enum(["partial", "final"]).optional(),
-        notes: z.string().optional(),
-        rows: z.array(spendRowSchema).min(1).max(5000),
+        network: z.enum(["meta", "google", "tiktok", "apple_ads"]).describe("The ad network the spend was paid to."),
+        source: z.enum(["network_api", "csv", "manual"]).optional()
+          .describe("Where the rows came from: network_api, csv or manual. The API uses manual when omitted."),
+        account_ref: z.string().optional().describe("Optional reference of the ad account the spend belongs to."),
+        currency: z.string().length(3).describe("Three-letter ISO 4217 code of every amount in rows, for example USD."),
+        report_timezone: z.string().optional()
+          .describe("Timezone of the network report the rows come from. The API uses UTC when omitted."),
+        covers_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+          .describe("First day the batch covers, YYYY-MM-DD, inclusive. Every row's metric_date must fall between covers_from and covers_to."),
+        covers_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+          .describe("Last day the batch covers, YYYY-MM-DD, inclusive, on or after covers_from."),
+        completeness: z.enum(["partial", "final"]).optional()
+          .describe("final when the network has settled these days; partial when it is still updating them. Either way, a newer import of a row with the same campaign, ad set, ad and day replaces the earlier one in reports; a campaign-level row and an ad-level row for one campaign and day are both kept and reported as spend_grain_conflict. The API uses partial when omitted."),
+        notes: z.string().optional().describe("Optional free-text note stored with the batch."),
+        rows: z.array(spendRowSchema).min(1).max(5000)
+          .describe("The spend rows, 1 to 5,000: one per campaign and day, or per campaign, ad set, ad and day."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -1334,14 +1357,20 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       description: "Version commission, payment fees and variable COGS used in profit decisions.",
       inputSchema: {
         app_id: requiredAppIdSchema,
-        effective_at: z.string(),
-        store_commission_bps: z.number().int().min(0).max(10_000),
-        payment_fee_bps: z.number().int().min(0).max(10_000),
-        variable_cogs_kind: z.enum(["bps", "per_unit_minor"]),
-        variable_cogs_value: z.number().nonnegative(),
+        effective_at: z.string()
+          .describe("When this cost version takes effect: a date (YYYY-MM-DD) or an ISO 8601 date-time."),
+        store_commission_bps: z.number().int().min(0).max(10_000)
+          .describe("Store commission in basis points, 0-10,000: 1,500 is 15% (Apple's Small Business Program), 3,000 is 30%."),
+        payment_fee_bps: z.number().int().min(0).max(10_000)
+          .describe("Payment fees outside the store commission, in basis points, 0-10,000. Usually 0 for App Store revenue."),
+        variable_cogs_kind: z.enum(["bps", "per_unit_minor"])
+          .describe("How variable_cogs_value is read: bps is a percent of revenue in basis points; per_unit_minor is a fixed amount per install in the currency's minor units."),
+        variable_cogs_value: z.number().nonnegative()
+          .describe("The other variable cost, a whole number: basis points of revenue, at most 10,000, for bps; minor units per install for per_unit_minor."),
         // Flat on purpose: z.json() is recursive, so it advertised a $ref/definitions tool schema that some
         // clients' function-calling formats refuse. 0.4.6 sent this shape; the API validates each value with z.json().
-        assumptions: z.record(z.string(), z.unknown()).optional(),
+        assumptions: z.record(z.string(), z.unknown()).optional()
+          .describe("Optional JSON object stored with this cost version. Its profit_threshold, a number, is the break-even bar: AttriKit suggests scale only when the low return per 1 unit of spend exceeds it (1.00 is true break-even). The API stores {} when omitted."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -1383,10 +1412,13 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       description: "Fetch and import creative-level spend from a configured Meta, Google or TikTok connection. AttriKit already pulls every enabled connection every 6 hours, covering today and the 3 days before; call this for an immediate pull or a longer window. Report rows are kept only for campaigns whose network id AttriKit knows (create_campaign_link.network_campaign_id); if none match, the call fails and imports nothing. A network reports rows only for ads that have delivered, so the first useful pull is after the ads start spending.",
       inputSchema: {
         app_id: requiredAppIdSchema,
-        network: z.enum(["meta", "google", "tiktok"]),
-        connection_id: z.string().optional(),
-        covers_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        covers_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        network: z.enum(["meta", "google", "tiktok"]).describe("The network to pull from: meta, google or tiktok. It needs an active integration."),
+        connection_id: z.string().optional()
+          .describe("The integration id, as returned by list_integrations. Needed only when several integrations of this network are active (otherwise 409 ambiguous_connection); omitted, the one active integration is used."),
+        covers_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+          .describe("First day of the report window to pull, YYYY-MM-DD, inclusive."),
+        covers_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+          .describe("Last day of the report window to pull, YYYY-MM-DD, inclusive, on or after covers_from."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -1421,11 +1453,14 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       title: "Create an ad-network integration",
       description: "Store encrypted network credentials and choose, for each of the eight event families (install, session, trial, subscription, purchase, refund, paywall, business), which source's copy AttriKit forwards to the network. AttriKit always does the sending; the owner only picks the copy. attrkit = the events your app reports through the AttriKit SDK (the RevenueCat copy of that family is dropped). revenuecat = the events AttriKit received from your RevenueCat webhook (the SDK copy is dropped); RevenueCat itself sends nothing to the network. customer = events your own servers post to AttriKit. If your app reports subscriptions only through RevenueCat, set trial, subscription, purchase and refund to revenuecat, or none of them reach the network. For Meta and TikTok, delivery_scope and renewal_event are optional; left out, the integration sends every install's events and renewals as Purchase.",
       inputSchema: {
-        network: z.enum(["meta", "google", "tiktok"]),
-        account_ref: z.string().min(1),
-        credential: z.string().min(1),
+        network: z.enum(["meta", "google", "tiktok"]).describe("The ad network: meta, google or tiktok."),
+        account_ref: z.string().min(1)
+          .describe("The ad account: for Meta the ad account ID starting with act_, for Google the Ads customer ID (123-456-7890), for TikTok the advertiser ID."),
+        credential: z.string().min(1)
+          .describe("The network credential, a JSON object written as a string. Meta: pixelId and accessToken. Google: linkId (conversions), accessToken and developerToken (spend). TikTok: eventSourceId (your Pixel code) and accessToken. Stored encrypted and never returned."),
         owners: ownersSchema.describe("For each event family, whose copy is forwarded: attrkit, revenuecat or customer (see the tool description). Enabling a destination requires ALL eight families to be present, or the API rejects the call."),
-        enable: z.boolean().optional(),
+        enable: z.boolean().optional()
+          .describe("true starts delivery at once, which needs all eight families in owners. false (the default) saves a draft that sends nothing."),
         delivery_scope: deliveryScopeSchema,
         renewal_event: renewalEventSchema,
         idempotency_key: idempotencyKeySchema,
@@ -1452,10 +1487,13 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       title: "Update an ad-network integration",
       description: "Rotate credentials or enable/disable an integration. set_delivery_options changes delivery_scope, renewal_event or both on a Meta or TikTok integration, in any status, without touching its credential or status; give at least one of the two.",
       inputSchema: {
-        connection_id: z.string(),
-        action: z.enum(["rotate", "disable", "enable", "set_delivery_options"]),
-        credential: z.string().optional(),
-        owners: ownersSchema.optional(),
+        connection_id: z.string().describe("The integration id, as returned by list_integrations."),
+        action: z.enum(["rotate", "disable", "enable", "set_delivery_options"])
+          .describe("rotate replaces the credential (send credential). disable stops delivery. enable starts it, once every one of the eight event families has a sender. set_delivery_options changes delivery_scope, renewal_event or both."),
+        credential: z.string().optional()
+          .describe("The new credential for rotate, in create_integration's format: a JSON object written as a string. Stored encrypted and never returned."),
+        owners: ownersSchema.optional()
+          .describe("Read by enable: the sender (attrkit, revenuecat or customer) of some or all event families, merged over the saved ones. Every family must end up with a sender, or the API rejects the call."),
         delivery_scope: deliveryScopeSchema,
         renewal_event: renewalEventSchema,
         idempotency_key: idempotencyKeySchema,
@@ -1487,7 +1525,7 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       title: "Delete an ad-network integration",
       description: "Delete a disabled integration. Enabled integrations must be disabled first.",
-      inputSchema: { connection_id: z.string() },
+      inputSchema: { connection_id: z.string().describe("The integration id, as returned by list_integrations.") },
     },
     async ({ connection_id }) => toToolResult(await call(
       `/api/v1/integrations/${encodeOpaquePathSegment(connection_id)}`,
@@ -1519,7 +1557,8 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
         // The schema exists to reject the SDK key people paste instead; it never said what the
         // right value is, so the rejection was correct and unactionable.
         provider_app_id: revenueCatProviderAppIdSchema.describe("RevenueCat's PROJECT app id from their dashboard app settings, not the SDK key."),
-        authorization_secret: z.string().min(16).max(1024),
+        authorization_secret: z.string().min(16).max(1024)
+          .describe("The Authorization header value set on the AttriKit webhook in RevenueCat's dashboard, 16 to 1,024 characters. Stored encrypted."),
         signing_secret: z.string().trim().min(16).max(1024).optional()
           .describe("RevenueCat's HMAC signing secret, for the X-RevenueCat-Webhook-Signature header. Optional: omitted, the stored one is kept."),
         idempotency_key: idempotencyKeySchema,
@@ -1554,10 +1593,13 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       title: "Create an outbound webhook",
       description: "Create an SSRF-checked webhook subscription. Returns the signing secret once.",
       inputSchema: {
-        url: z.string().url(),
-        event_types: z.array(z.enum(["install", "event", "decision", "fraud"])).min(1).max(4),
-        description: z.string().max(500).optional(),
-        app_id: z.string().uuid().optional(),
+        url: z.string().url()
+          .describe("Your public HTTPS endpoint, on the default port 443. HTTP, other ports, credentials in the URL, and local, private or other non-public targets (checked after DNS resolution) are rejected."),
+        event_types: z.array(z.enum(["install", "event", "decision", "fraud"])).min(1).max(4)
+          .describe("The notifications to receive, 1 to 4 of install, event, decision and fraud."),
+        description: z.string().max(500).optional().describe("Optional label for the subscription, at most 500 characters."),
+        app_id: z.string().uuid().optional()
+          .describe("Optional app UUID to receive one app's notifications only. Omitted, a workspace key subscribes to all apps; an app-scoped key always subscribes to its own app."),
         idempotency_key: idempotencyKeySchema,
       },
     },
@@ -1579,7 +1621,7 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       title: "Delete an outbound webhook",
       description: "Delete a webhook subscription.",
-      inputSchema: { subscription_id: z.string().uuid() },
+      inputSchema: { subscription_id: z.string().uuid().describe("The subscription id (UUID), as returned by list_webhooks or create_webhook.") },
     },
     async ({ subscription_id }) => toToolResult(await call(
       `/api/v1/webhooks/${encodeURIComponent(subscription_id)}`,
@@ -1641,12 +1683,16 @@ export function createServer(config: McpConfig, fetchImpl?: typeof fetch): McpSe
         customer_user_id: z.string().min(1).max(256).describe("The opaque id your app passed to AttriKit.setUserID. Refused when it looks like an email address or phone number. Hashed on arrival, never stored."),
         event_id: z.string().uuid().describe("Your id for this event. A second event with the same id is a duplicate and is not written again."),
         event_name: z.string().min(1).max(128).regex(/^[a-z][a-z0-9_.-]*$/).describe("Canonical event name, for example purchase or subscription_started."),
-        event_version: z.number().int().positive(),
+        event_version: z.number().int().positive()
+          .describe("The version of this event's definition, a positive integer. The SDKs send 1 by default."),
         occurred_at: z.string().datetime({ offset: true }).describe("When the event happened, ISO 8601 with a UTC offset."),
         consent: z.object({
-          measurement: z.enum(["granted", "denied", "unknown"]),
-          tracking: z.enum(["granted", "denied", "unknown"]),
-          policy_version: z.number().int().positive(),
+          measurement: z.enum(["granted", "denied", "unknown"])
+            .describe("The user's measurement consent: granted, denied or unknown. Only a granted event is collected."),
+          tracking: z.enum(["granted", "denied", "unknown"])
+            .describe("The user's tracking consent: granted, denied or unknown."),
+          policy_version: z.number().int().positive()
+            .describe("The version of the consent policy the user answered, a positive integer."),
           dma: z.object({
             eea: z.boolean().describe("Whether EEA, UK or Swiss rules apply to this user."),
             ad_user_data: z.boolean().optional().describe("The user's ad_user_data consent."),

@@ -31,6 +31,27 @@ function productionCsvHeader(): string {
   return columns.map((column) => `"${column}"`).join(",");
 }
 
+// The parts of a listed tool input schema that can hold an argument: its properties, an array's
+// items, a record's values and the branches of a union. Anything else is dropped by the parse.
+interface ListedSchema {
+  description?: string;
+  properties?: Record<string, ListedSchema>;
+  items?: ListedSchema;
+  additionalProperties?: ListedSchema | boolean;
+  anyOf?: ListedSchema[];
+  oneOf?: ListedSchema[];
+  allOf?: ListedSchema[];
+}
+const listedSchema: z.ZodType<ListedSchema> = z.lazy(() => z.object({
+  description: z.string().optional(),
+  properties: z.record(z.string(), listedSchema).optional(),
+  items: listedSchema.optional(),
+  additionalProperties: z.union([listedSchema, z.boolean()]).optional(),
+  anyOf: z.array(listedSchema).optional(),
+  oneOf: z.array(listedSchema).optional(),
+  allOf: z.array(listedSchema).optional(),
+}));
+
 function testEnv(values: Record<string, string> = {}): NodeJS.ProcessEnv {
   return values;
 }
@@ -82,6 +103,11 @@ describe("readConfig", () => {
     expect(readConfig(testEnv({ ATTRKIT_API_KEY: "sk_x" })).apiUrl).toBe("https://attrikit.io");
     expect(readConfig(testEnv({ ATTRKIT_API_KEY: "sk_x", ATTRKIT_API_URL: "https://api.example.com/" })).apiUrl)
       .toBe("https://api.example.com");
+  });
+
+  it("treats an empty or whitespace-only ATTRKIT_API_URL as unset", () => {
+    expect(readConfig(testEnv({ ATTRKIT_API_KEY: "sk_x", ATTRKIT_API_URL: "" })).apiUrl).toBe("https://attrikit.io");
+    expect(readConfig(testEnv({ ATTRKIT_API_KEY: "sk_x", ATTRKIT_API_URL: " \t\n" })).apiUrl).toBe("https://attrikit.io");
   });
 
   it("rejects non-loopback HTTP endpoints but allows loopback HTTP", () => {
@@ -454,6 +480,38 @@ describe("createServer", () => {
       const listed = await client.listTools();
       expect(listed.tools.map((tool) => tool.name).sort())
         .toEqual([...TOOL_NAMES].sort());
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  // An external validator found 60 arguments of the published 2.0.0 schemas with no description,
+  // so an agent had only a name and a type to go on. Read from the listed schemas, as a client sees
+  // them, so a nested object, an array's items and a nullable union are all walked.
+  it("describes every argument of every tool, nested ones included", async () => {
+    const server = createServer(config, mockFetch({ ok: true, body: {} }));
+    const client = new Client({ name: "attrkit-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const { tools } = await client.listTools();
+      const undescribed: string[] = [];
+      let checked = 0;
+      const walk = (path: string, node: ListedSchema | boolean | undefined): void => {
+        if (node === undefined || node === true || node === false) return;
+        for (const [name, property] of Object.entries(node.properties ?? {})) {
+          checked += 1;
+          if ((property.description ?? "").trim() === "") undescribed.push(`${path}.${name}`);
+          walk(`${path}.${name}`, property);
+        }
+        walk(`${path}[]`, node.items);
+        walk(`${path}{}`, node.additionalProperties);
+        for (const branch of [...(node.anyOf ?? []), ...(node.oneOf ?? []), ...(node.allOf ?? [])]) walk(path, branch);
+      };
+      for (const tool of tools) walk(tool.name, listedSchema.parse(tool.inputSchema));
+      expect(checked).toBeGreaterThan(150);
+      expect(undescribed).toEqual([]);
     } finally {
       await client.close();
       await server.close();
@@ -1272,6 +1330,47 @@ describe("review corrections", () => {
       if (!refusal.success) throw new Error("create_campaign_link returned no text content");
       expect(refusal.data.text).toContain("app_id");
       expect(refuseFetch.mock.calls.length, "the empty app id reached the API instead of the schema").toBe(0);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  // The API refuses a management key without read (managementApiKeyInput in
+  // apps/web/lib/management-api-keys.ts), and the description used to offer "read, write or both".
+  // 2.0.1 corrects the description only: a write-only call still reaches the API, which answers 400.
+  // Mutation watched red: restore the old description, or refuse the call in the schema.
+  it("describes the scopes create_api_key accepts and still sends a write-only call to the API", async () => {
+    const apiFetch = mockFetch({ status: 400, body: { error: { code: "invalid_request", message: "Management keys must include read scope" } } });
+    const server = createServer(config, apiFetch);
+    const client = new Client({ name: "attrkit-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const refused = await client.callTool({ name: "create_api_key", arguments: { label: "ci", scopes: ["write"] } });
+      expect(refused.isError).toBe(true);
+      expect(apiFetch.mock.calls.length, "a write-only key must still reach the API, as in 2.0.0").toBe(1);
+      const listed = (await client.listTools()).tools.find((tool) => tool.name === "create_api_key");
+      const scopes = listedSchema.parse(listed?.inputSchema).properties?.scopes;
+      expect(scopes?.description).toContain("the API refuses [\"write\"] alone");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  // Each report picks its cost version by its own rule (read-core.ts against the window end,
+  // profit-rollups.ts per cohort date), so a version dated inside a window can reprice it.
+  it("does not promise that a new cost version leaves earlier reports untouched", async () => {
+    const server = createServer(config, mockFetch({ ok: true, body: {} }));
+    const client = new Client({ name: "attrkit-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const listed = (await client.listTools()).tools.find((tool) => tool.name === "set_cost_model");
+      const effectiveAt = listedSchema.parse(listed?.inputSchema).properties?.effective_at;
+      expect(effectiveAt?.description).toMatch(/takes effect/);
+      expect(effectiveAt?.description).not.toMatch(/earlier|alter|history/i);
     } finally {
       await client.close();
       await server.close();
