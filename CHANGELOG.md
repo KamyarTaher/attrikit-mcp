@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0 (2026-11-02)
+
+### Changed
+
+- **Node.js 22 or newer is required.** `engines.node` is `>=22` (it was `>=18`). A client that
+  starts the server with an older Node, through `npx -y @attrkit/mcp` or a pinned path, must move
+  to Node 22 or stay on `@attrkit/mcp@1`. The tools, their inputs and their outputs are unchanged.
+  Decided by the owner on 2026-10-20.
+- The package declares `mcpName` `io.attrikit/mcp`, the name it is to be listed under in the
+  official MCP Registry. Its `repository` and `bugs` now point at the public source,
+  github.com/KamyarTaher/attrikit-mcp, instead of a private repository that answered 404, and its
+  description and keywords say what it manages: iOS and Android apps, campaign links, ad spend and
+  campaign decisions.
+
 ## 1.4.0 (2026-10-21)
 
 ### Added

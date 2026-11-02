@@ -1,20 +1,36 @@
 {
   "name": "@attrkit/mcp",
-  "version": "1.4.0",
-  "description": "AttriKit's stdio MCP server for its public Management API",
+  "version": "2.0.0",
+  "description": "MCP server for AttriKit web-to-app attribution: manage iOS and Android apps, campaign links, ad spend and scale, cut or hold decisions from your agent",
+  "mcpName": "io.attrikit/mcp",
   "keywords": [
     "attrkit",
-    "attribution",
+    "attrikit",
     "mcp",
+    "mcp-server",
     "model-context-protocol",
-    "automation",
+    "attribution",
+    "mobile-attribution",
+    "web-to-app",
+    "install-attribution",
+    "ios",
+    "android",
+    "marketing-analytics",
+    "meta-ads",
+    "tiktok-ads",
+    "revenuecat",
+    "claude",
+    "cursor",
     "agent-tools"
   ],
   "homepage": "https://attrikit.io/en/docs/mcp",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KamyarTaher/attrikit.git",
-    "directory": "packages/mcp"
+    "url": "git+https://github.com/KamyarTaher/attrikit-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KamyarTaher/attrikit-mcp/issues",
+    "email": "contact@clashware.com"
   },
   "license": "MIT",
   "type": "module",

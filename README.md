@@ -1,9 +1,14 @@
 # @attrkit/mcp
 
-A stdio [MCP](https://modelcontextprotocol.io) server that lets you drive
-[AttriKit](https://attrikit.io) from Codex, Cursor, Gemini, or another MCP client.
-It is a thin client over AttriKit's public API. It holds no database access; your
-tenant scope is resolved from your secret management key.
+A stdio [MCP](https://modelcontextprotocol.io) server for [AttriKit](https://attrikit.io),
+web-to-app attribution for iOS and Android apps that buy ads. Use it from Claude Code,
+Claude Desktop, Codex, Cursor, Gemini CLI, VS Code or Windsurf to create campaign links,
+import spend, read each campaign's scale, cut or hold call, and export installs and events.
+It is a thin client over AttriKit's public API. It holds no database access; your tenant
+scope is resolved from your secret management key.
+
+Source: [KamyarTaher/attrikit-mcp](https://github.com/KamyarTaher/attrikit-mcp). Report an
+issue there or at contact@clashware.com. MIT licensed.
 
 ## What it exposes
 

@@ -1999,3 +1999,51 @@ describe("a read carried by POST", () => {
     expect(toToolResult(result).content[0]!.text).toContain("retry with idempotency_key");
   });
 });
+
+// The official MCP Registry accepts an npm server only when the published package.json's mcpName
+// equals server.json's name, and it lists the version server.json names. A release that bumps one
+// file and not the other is refused by the registry after npm already has it.
+describe("MCP Registry manifest", () => {
+  it("names the package, its mcpName and the server version", () => {
+    const manifest = z.object({ name: z.string(), mcpName: z.string(), version: z.string() }).parse(
+      JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")),
+    );
+    const server = z.object({
+      name: z.string(),
+      version: z.string(),
+      packages: z.array(z.object({ registryType: z.string(), identifier: z.string(), version: z.string() })).length(1),
+    }).parse(JSON.parse(readFileSync(new URL("../server.json", import.meta.url), "utf8")));
+    expect(manifest.mcpName).toBe("io.attrikit/mcp");
+    expect(server.name).toBe(manifest.mcpName);
+    expect(server.version).toBe(SERVER_VERSION);
+    expect(server.packages[0]).toMatchObject({ registryType: "npm", identifier: manifest.name, version: SERVER_VERSION });
+    expect(manifest.version).toBe(SERVER_VERSION);
+  });
+});
+
+// The site tells a reader which Node starts the server, in five places that no build reads from
+// package.json. On 2.0.0 four moved to 22 and llms.txt stayed on 18, with every gate green.
+describe("the Node.js requirement the public copy states", () => {
+  it("is the major engines.node declares, on every surface", () => {
+    const manifest = z.object({ engines: z.object({ node: z.string() }) }).parse(
+      JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")),
+    );
+    const major = /^>=(\d+)$/.exec(manifest.engines.node)?.[1];
+    expect(major, manifest.engines.node).toBeDefined();
+    const surfaces: ReadonlyArray<readonly [string, string]> = [
+      ["../README.md", `Install Node.js ${major} or newer.`],
+      ["../../../apps/web/public/llms.txt", `Requires Node.js ${major} or newer.`],
+      ["../../../apps/web/components/marketing/content.ts", `Install Node.js ${major} or newer.`],
+      ["../../../apps/web/app/[locale]/(app)/dashboard/settings/api-keys/mcp-connect-card.tsx", `Node.js ${major}+.`],
+      ["../../../apps/web/components/setup/ai-setup-steps.tsx", `Needs Node.js ${major}+.`],
+    ];
+    for (const [path, sentence] of surfaces) {
+      const text = readFileSync(new URL(path, import.meta.url), "utf8");
+      expect(text, path).toContain(sentence);
+      // The README keeps one line on what 1.x accepted; the site states only the current minimum.
+      if (path === "../README.md") continue;
+      const stated = [...text.matchAll(/Node\.js (\d+)/g)].map((match) => match[1]);
+      expect(new Set(stated), path).toEqual(new Set([major]));
+    }
+  });
+});

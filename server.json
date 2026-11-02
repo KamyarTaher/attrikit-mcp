@@ -1,0 +1,58 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.attrikit/mcp",
+  "title": "AttriKit",
+  "description": "Run AttriKit web-to-app attribution from an agent: apps, campaign links, spend, decisions, exports",
+  "repository": {
+    "url": "https://github.com/KamyarTaher/attrikit-mcp",
+    "source": "github"
+  },
+  "version": "2.0.0",
+  "websiteUrl": "https://attrikit.io/en/docs/mcp",
+  "icons": [
+    {
+      "src": "https://attrikit.io/icons/icon-192.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "192x192"
+      ]
+    },
+    {
+      "src": "https://attrikit.io/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@attrkit/mcp",
+      "version": "2.0.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ATTRKIT_API_KEY",
+          "description": "AttriKit management key (sk_...), created in Dashboard > Settings > API keys & MCP. On macOS, `npx -y @attrkit/mcp login` can store it in the Keychain instead.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string",
+          "placeholder": "sk_your_key_here"
+        },
+        {
+          "name": "ATTRKIT_API_URL",
+          "description": "AttriKit API base URL.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "https://attrikit.io"
+        }
+      ]
+    }
+  ]
+}

@@ -560,7 +560,7 @@ export const TOOL_NAMES = [
   "lookup_customer_attribution",
 ] as const;
 
-export const SERVER_VERSION = "1.4.0";
+export const SERVER_VERSION = "2.0.0";
 
 const periodSchema = z
   .enum(["7d", "30d", "90d", "all"])
